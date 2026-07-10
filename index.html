@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>فاتورتيtitle>
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <style>
+        body { font-family: sans-serif; background: #f4f7f6; padding: 20px; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .section { margin-bottom: 20px; padding: 15px; border: 1px solid #ddd; border-radius: 8px; background: #fcfcfc; }
+        .fav-grid { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
+        .fav-btn { padding: 8px 12px; background: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        
+        /* تحسين الجدول وأزرار الكمية */
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: center; }
+        .qty-btn { padding: 5px 10px; cursor: pointer; font-weight: bold; border-radius: 4px; border: 1px solid #ccc; }
+        
+        input { padding: 10px; border: 1px solid #ccc; border-radius: 4px; width: 100%; margin-bottom: 5px; }
+        button { padding: 10px; cursor: pointer; border: none; border-radius: 4px; background: #28a745; color: white; margin-top: 5px; }
+        
+        @media print { .no-print { display: none !important; } }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>نظام الكاشير المتكامل</h2>
+
+    <div class="no-print section">
+        <h3>تعريف منتج (باركود)</h3>
+        <input type="text" id="dbName" placeholder="اسم المنتج">
+        <input type="number" id="dbPrice" placeholder="السعر">
+        <input type="text" id="dbCode" placeholder="رقم الباركود">
+        <button style="background:#6f42c1" onclick="saveToDB()">حفظ المنتج</button>
+    </div>
+
+    <div class="no-print section">
+        <h3>ماسح الباركود (سيلفي)</h3>
+        <div id="reader" style="width: 250px; margin: auto;"></div>
+        <button onclick="startScanner()">تشغيل الكاميرا</button>
+        <button onclick="stopScanner()" style="background:#dc3545">إيقاف</button>
+    </div>
+
+    <div class="no-print section">
+        <h3>المنتجات المفضلة</h3>
+        <div class="fav-grid" id="favContainer"></div>
+    </div>
+
+    <table id="invoiceTable">
+        <thead><tr><th>المنتج</th><th>السعر</th><th>الكمية</th><th>الإجمالي</th><th class="no-print">إجراء</th></tr></thead>
+        <tbody id="invoiceBody"></tbody>
+    </table>
+    <h3>الإجمالي الكلي: <span id="grandTotal">0</span> د.ع</h3>
+    <button class="no-print" onclick="window.print()" style="width:100%; font-size:1.2em;">طباعة الفاتورة</button>
+</div>
+
+<script>
+    let html5QrcodeScanner;
+    window.onload = () => { renderFavs(); renderInvoice(); };
+
+    // --- منطق البيانات ---
+    function saveToDB() {
+        const name = document.getElementById('dbName').value;
+        const price = document.getElementById('dbPrice').value;
+        const code = document.getElementById('dbCode').value;
+        if(!name || !price || !code) return alert("أدخل البيانات");
+        let products = JSON.parse(localStorage.getItem('products') || '{}');
+        products[code] = {name, price: parseFloat(price)};
+        localStorage.setItem('products', JSON.stringify(products));
+        alert("تم الحفظ!");
+    }
+
+    function startScanner() {
+        html5QrcodeScanner = new Html5Qrcode("reader");
+        html5QrcodeScanner.start({ facingMode: "user" }, { fps: 10, qrbox: 200 }, (decodedText) => {
+            let products = JSON.parse(localStorage.getItem('products') || '{}');
+            if(products[decodedText]) addItem(products[decodedText].name, products[decodedText].price);
+            else alert("المنتج غير معرف!");
+            stopScanner();
+        });
+    }
+    function stopScanner() { if(html5QrcodeScanner) html5QrcodeScanner.stop(); }
+
+    function renderFavs() {
+        const container = document.getElementById('favContainer');
+        container.innerHTML = "";
+        let favs = JSON.parse(localStorage.getItem('favs') || '[]');
+        favs.forEach(f => {
+            let btn = document.createElement('button');
+            btn.className = 'fav-btn';
+            btn.innerText = f.name;
+            btn.onclick = () => addItem(f.name, f.price);
+            container.appendChild(btn);
+        });
+    }
+
+    // --- الفاتورة (الزيادة والنقصان) ---
+    function addItem(name, price) {
+        let inv = JSON.parse(localStorage.getItem('inv') || '[]');
+        let item = inv.find(i => i.name === name);
+        if(item) item.qty++;
+        else inv.push({name, price: parseFloat(price), qty: 1});
+        localStorage.setItem('inv', JSON.stringify(inv));
+        renderInvoice();
+    }
+
+    // وظيفة التنقيص الجديدة
+    function decreaseItem(index) {
+        let inv = JSON.parse(localStorage.getItem('inv') || '[]');
+        if (inv[index].qty > 1) {
+            inv[index].qty--;
+        } else {
+            inv.splice(index, 1);
+        }
+        localStorage.setItem('inv', JSON.stringify(inv));
+        renderInvoice();
+    }
+
+    function renderInvoice() {
+        const body = document.getElementById('invoiceBody');
+        body.innerHTML = "";
+        let inv = JSON.parse(localStorage.getItem('inv') || '[]');
+        let total = 0;
+        inv.forEach((item, i) => {
+            let sum = item.price * item.qty;
+            total += sum;
+            body.innerHTML += `<tr>
+                <td>${item.name}</td>
+                <td>${item.price}</td>
+                <td>
+                    <button class="qty-btn" onclick="decreaseItem(${i})">-</button>
+                    ${item.qty}
+                    <button class="qty-btn" onclick="addItem('${item.name}', ${item.price})">+</button>
+                </td>
+                <td>${sum}</td>
+                <td class="no-print"><button onclick="delItem(${i})" style="background:red; color:white; border:none; padding:5px;">حذف</button></td>
+            </tr>`;
+        });
+        document.getElementById('grandTotal').innerText = total;
+    }
+
+    function delItem(i) {
+        let inv = JSON.parse(localStorage.getItem('inv') || '[]');
+        inv.splice(i, 1);
+        localStorage.setItem('inv', JSON.stringify(inv));
+        renderInvoice();
+    }
+</script>
+</body>
+</html>
